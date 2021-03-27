@@ -1,0 +1,17 @@
+name: C/C++ CI
+
+on: [push,pull_request]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-16.04
+    
+    steps:
+    - uses: actions/checkout@v1
+    - name: make
+      working-directory: ./test
+      run: make
+    - name: run
+      working-directory: ./test
+      run: ./main
