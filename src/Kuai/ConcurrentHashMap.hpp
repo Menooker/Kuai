@@ -7,7 +7,33 @@
 
 namespace Kuai
 {
-    template <typename K, typename V, typename Hasher = std::hash<K>, typename Comparer = std::equal_to<K>>
+
+    struct PolicyNoRemove
+    {
+        struct DummyLock
+        {
+            void lock() {}
+            void unlock() {}
+        };
+        static constexpr bool canRemove = false;
+        using BucketLock = SpinLock;
+        using BucketReadLock = DummyLock;
+        using BucketWriteLock = SpinLock;
+        static DummyLock getReadLockRef(SpinLock &l) { return DummyLock(); }
+        static SpinLock &getWriteLockRef(SpinLock &l) { return l; }
+    };
+
+    struct PolicyCanRemove
+    {
+        static constexpr bool canRemove = true;
+        using BucketLock = SpinRWLock;
+        using BucketReadLock = SpinRWLock::ReadLock;
+        using BucketWriteLock = SpinRWLock::WriteLock;
+        static BucketReadLock getReadLockRef(SpinRWLock &l) { return l.read(); }
+        static BucketWriteLock getWriteLockRef(SpinRWLock &l) { return l.write(); }
+    };
+
+    template <typename BucketPolicy, typename K, typename V, typename Hasher = std::hash<K>, typename Comparer = std::equal_to<K>>
     struct ConHashMap
     {
         struct PairType
@@ -19,7 +45,7 @@ namespace Kuai
         struct Bucket
         {
             std::atomic<HashListNode *> ptr = {nullptr};
-            SpinLock writeLock;
+            typename BucketPolicy::BucketLock bucketLock;
         };
 
         Bucket *buckets;
@@ -28,6 +54,8 @@ namespace Kuai
         Comparer cmper;
 
     private:
+        using BucketReadLock = typename BucketPolicy::BucketReadLock;
+        using BucketWriteLock = typename BucketPolicy::BucketWriteLock;
         Bucket &getBucket(const K &k)
         {
             uint32_t hashv = hasher(k);
@@ -43,17 +71,25 @@ namespace Kuai
             return ret;
         }
 
-        HashListNode *findNode(HashListNode *headNode, const K &k)
+        HashListNode *findNode(HashListNode *headNode, const K &k, HashListNode *&prevNode)
         {
+            prevNode = nullptr;
             while (headNode)
             {
                 if (cmper(headNode->data.k, k))
                 {
                     return headNode;
                 }
+                prevNode = headNode;
                 headNode = headNode->next.load();
             }
             return nullptr;
+        }
+
+        HashListNode *findNode(HashListNode *headNode, const K &k)
+        {
+            HashListNode *prevNode;
+            return findNode(headNode, k, prevNode);
         }
 
     public:
@@ -80,7 +116,10 @@ namespace Kuai
 
         Option<V> get(const K &k)
         {
-            HashListNode *cur = findNode(getBucket(k).ptr.load(), k);
+            Bucket &buck = getBucket(k);
+            auto &&rlock = BucketPolicy::getReadLockRef(buck.bucketLock);
+            std::lock_guard<BucketReadLock> guard(rlock);
+            HashListNode *cur = findNode(buck.ptr.load(), k);
             if (cur)
             {
                 return Option<V>(V(cur->data.v));
@@ -91,7 +130,8 @@ namespace Kuai
         void set(const K &k, V &&v)
         {
             Bucket &buck = getBucket(k);
-            std::lock_guard<SpinLock> guard(buck.writeLock);
+            auto &&wlock = BucketPolicy::getWriteLockRef(buck.bucketLock);
+            std::lock_guard<BucketWriteLock> guard(wlock);
             HashListNode *cur = buck.ptr.load();
             HashListNode *headNode = cur;
             cur = findNode(cur, k);
@@ -103,10 +143,37 @@ namespace Kuai
             buck.ptr.store(makeNewNode(k, std::move(v), headNode));
         }
 
+        template <typename Dummy = BucketPolicy>
+        typename std::enable_if<Dummy::canRemove>::type remove(const K &k)
+        {
+            Bucket &buck = getBucket(k);
+            auto &&wlock = BucketPolicy::getWriteLockRef(buck.bucketLock);
+            std::lock_guard<BucketWriteLock> guard(wlock);
+            HashListNode *cur = buck.ptr.load();
+            HashListNode *headNode = cur;
+            HashListNode *prevNode;
+            cur = findNode(cur, k, prevNode);
+            if (cur)
+            {
+                if (prevNode)
+                {
+                    prevNode->next.store(cur->next.load());
+                }
+                else
+                {
+                    buck.ptr.store(cur->next.load());
+                }
+                delete cur;
+                return;
+            }
+            throw std::runtime_error("Cannot find the key!");
+        }
+
         Option<V> setIfAbsent(const K &k, V &&v)
         {
             Bucket &buck = getBucket(k);
-            std::lock_guard<SpinLock> guard(buck.writeLock);
+            auto &&wlock = BucketPolicy::getWriteLockRef(buck.bucketLock);
+            std::lock_guard<BucketWriteLock> guard(wlock);
             HashListNode *cur = buck.ptr.load();
             HashListNode *headNode = cur;
             cur = findNode(cur, k);

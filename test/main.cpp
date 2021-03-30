@@ -36,7 +36,7 @@ uint32_t myrand_n0(uint32_t &seed)
 
 int main()
 {
-    ConHashMap<int, int> map(32 * 1024);
+    ConHashMap<PolicyCanRemove, int, int> map(32 * 1024);
     std::atomic<int> reads = {0};
     std::atomic<int> writes = {0};
     auto runner = [&map, &reads, &writes](uint32_t seed) {
