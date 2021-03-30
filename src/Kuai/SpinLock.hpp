@@ -46,7 +46,7 @@ namespace Kuai
                     // if read count >=0 (no write lock), count++
                     if (oldv >= 0)
                     {
-                        if (!lc.readCount.compare_exchange_weak(oldv, oldv + 1))
+                        if (lc.readCount.compare_exchange_weak(oldv, oldv + 1))
                         {
                             break;
                         }
