@@ -36,7 +36,7 @@ namespace Kuai
         {
             SpinRWLock& lc;
             ReadLock(SpinRWLock &l) : lc(l) {}
-            ReadLock(const ReadLock &) = delete;
+            ReadLock(const ReadLock &) = default;
             ReadLock(ReadLock &&) = default;
             void lock()
             {
@@ -46,10 +46,8 @@ namespace Kuai
                     // if read count >=0 (no write lock), count++
                     if (oldv >= 0)
                     {
-                        if (lc.readCount.compare_exchange_weak(oldv, oldv + 1))
-                        {
-                            break;
-                        }
+                        ++lc.readCount;
+                        break;
                     }
                     else
                     {
@@ -68,7 +66,7 @@ namespace Kuai
         {
             SpinRWLock &lc;
             WriteLock(SpinRWLock &l) : lc(l) {}
-            WriteLock(const WriteLock &) = delete;
+            WriteLock(const WriteLock &) = default;
             WriteLock(WriteLock &&) = default;
             void lock()
             {

@@ -36,7 +36,7 @@ uint32_t myrand_n0(uint32_t &seed)
 
 int main()
 {
-    ConHashMap<PolicyCanRemove, int, int> map(32 * 1024);
+    ConHashMap<PolicyCanRemove, int, int> map(1024);
     std::atomic<int> reads = {0};
     std::atomic<int> writes = {0};
     auto runner = [&map, &reads, &writes](uint32_t seed) {
@@ -54,7 +54,7 @@ int main()
                 if (vec[idx].compare_exchange_strong(newval, value))
                 {
                     auto oldv = map.setIfAbsent(idx, value);
-                    myassert(!oldv.hasData());
+                    myassert(!oldv);
                     ++writes;
                     break;
                 }
@@ -64,13 +64,13 @@ int main()
             {
                 auto ret = map.get(idx);
                 auto true_val = vec[idx].load();
-                myassert(ret.hasData() == (true_val != 0));
+                myassert(bool(ret) == (true_val != 0));
                 if (true_val)
                 {
-                    myassert(ret.get() == true_val);
+                    myassert(*ret == true_val);
                     auto oldv = map.setIfAbsent(idx, 2);
-                    myassert(oldv.hasData());
-                    myassert(oldv.get() == true_val);
+                    myassert(oldv);
+                    myassert(*oldv == true_val);
                 }
                 ++reads;
             }

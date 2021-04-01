@@ -1,3 +1,2 @@
-test/main
+test/bin*
 .vscode/*
-*.o

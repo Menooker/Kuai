@@ -14,4 +14,4 @@ jobs:
       run: make
     - name: run
       working-directory: ./test
-      run: ./main
+      run: ./bin/main
