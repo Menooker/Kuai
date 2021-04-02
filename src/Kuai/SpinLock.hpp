@@ -34,7 +34,7 @@ namespace Kuai
 
         struct ReadLock
         {
-            SpinRWLock& lc;
+            SpinRWLock &lc;
             ReadLock(SpinRWLock &l) : lc(l) {}
             ReadLock(const ReadLock &) = default;
             ReadLock(ReadLock &&) = default;
@@ -46,8 +46,10 @@ namespace Kuai
                     // if read count >=0 (no write lock), count++
                     if (oldv >= 0)
                     {
-                        ++lc.readCount;
-                        break;
+                        if (lc.readCount.compare_exchange_weak(oldv, oldv + 1))
+                        {
+                            break;
+                        }
                     }
                     else
                     {

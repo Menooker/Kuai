@@ -7,11 +7,13 @@ all: ${BIN_DIR}/main ${BIN_DIR}/benchmark
 ${BIN_DIR}:
 	mkdir -p ${BIN_DIR}
 
-${BIN_DIR}/main.o: ${SRC} ${BIN_DIR}
-${BIN_DIR}/benchmark.o : ${SRC} ${BIN_DIR}
+${BIN_DIR}/main.o: ${SRC} ${BIN_DIR} main.cpp
+	g++ -c ${CXXFLAGS} main.cpp -o ${BIN_DIR}/main.o
+${BIN_DIR}/benchmark.o : ${SRC} ${BIN_DIR} benchmark.cpp
+	g++ -c ${CXXFLAGS} benchmark.cpp -o ${BIN_DIR}/benchmark.o
 
-${BIN_DIR}/main: main.o 
-	g++ ${CXXFLAGS} -pthread main.o -o ${BIN_DIR}/main
+${BIN_DIR}/main: ${BIN_DIR}/main.o
+	g++ ${CXXFLAGS} -pthread ${BIN_DIR}/main.o -o ${BIN_DIR}/main
 
-${BIN_DIR}/benchmark: benchmark.o 
-	g++ ${CXXFLAGS} -pthread benchmark.o -o ${BIN_DIR}/benchmark
+${BIN_DIR}/benchmark: ${BIN_DIR}/benchmark.o 
+	g++ ${CXXFLAGS} -pthread ${BIN_DIR}/benchmark.o -o ${BIN_DIR}/benchmark
