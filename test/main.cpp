@@ -1,4 +1,5 @@
 #include <Kuai/ConcurrentHashMap.hpp>
+#include <Kuai/Globals.hpp>
 #include <utility>
 #include <cassert>
 #include <thread>
@@ -91,5 +92,7 @@ int main()
     {
         threads[i].join();
     }
+    map.remove(25766393);
+    map.garbageCollect();
     printf("Done r=%d, w=%d\n", reads.load(), writes.load());
 }

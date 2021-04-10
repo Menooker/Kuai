@@ -1,4 +1,5 @@
 #include <Kuai/ConcurrentHashMap.hpp>
+#include <Kuai/Globals.hpp>
 #include <utility>
 #include <cassert>
 #include <thread>

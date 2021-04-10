@@ -1,6 +1,7 @@
 #pragma once
 #include "SpinLock.hpp"
 #include "ListNode.hpp"
+#include "LogicalClock.hpp"
 #include <stdint.h>
 #include <utility>
 
@@ -9,42 +10,109 @@ namespace Kuai
 
     struct PolicyNoRemove
     {
-        struct DummyLock
+        static void updateLocalClock()
         {
-            void lock() {}
-            void unlock() {}
+        }
+        struct DeletionFlag
+        {
+            constexpr bool isDeleted()
+            {
+                return false;
+            }
+        };
+        struct DeletionQueue
+        {
+            typedef void (*Deleter)(DeletionFlag *);
+            DeletionQueue(Deleter v) {}
         };
         static constexpr bool canRemove = false;
-        using BucketLock = SpinLock;
-        using BucketReadLock = DummyLock;
-        using BucketWriteLock = SpinLock;
-        static DummyLock getReadLockRef(SpinLock &l) { return DummyLock(); }
-        static SpinLock &getWriteLockRef(SpinLock &l) { return l; }
     };
 
     struct PolicyCanRemove
     {
         static constexpr bool canRemove = true;
-        using BucketLock = SpinRWLock;
-        using BucketReadLock = SpinRWLock::ReadLock;
-        using BucketWriteLock = SpinRWLock::WriteLock;
-        static BucketReadLock getReadLockRef(SpinRWLock &l) { return l.read(); }
-        static BucketWriteLock getWriteLockRef(SpinRWLock &l) { return l.write(); }
+        static void updateLocalClock()
+        {
+            // sync local clock with global clock, indicating this core has seen the events with logical tick
+            // less than the current global clock
+            ThreadClock::updateLocalClock();
+        }
+
+        struct DeletionFlag
+        {
+            std::atomic<uint64_t> deleteTick = {0};
+            void markDeleted()
+            {
+                // push up the global clock, indicating there is a new event that may not be seen by other cores
+                deleteTick.store(++GlobalClock::clock.logicalClock);
+            }
+
+            bool readyToDelete()
+            {
+                return GlobalClock::clock.get_min_lock() >= deleteTick.load();
+            }
+            bool isDeleted()
+            {
+                // It is safe if a thread checks isDeleted before another thread marks it deleted. Since the global clock is increased,
+                // by node deletion and the thread has not yet updated the local lock, the thread's local lock will be less than the
+                // deleteTick
+                return deleteTick.load();
+            }
+        };
+
+        struct DeletionQueue
+        {
+            std::mutex lock;
+            std::vector<DeletionFlag *> queue;
+            typedef void (*Deleter)(DeletionFlag *);
+            Deleter deleter;
+            DeletionQueue(Deleter deleter) : deleter(deleter) {}
+            void enqueue(DeletionFlag *p)
+            {
+                std::lock_guard<std::mutex> guard(lock);
+                queue.emplace_back(p);
+            }
+
+            void doGC()
+            {
+                std::lock_guard<std::mutex> guard(lock);
+                for (auto itr = queue.begin(); itr != queue.end();)
+                {
+                    if ((*itr)->readyToDelete())
+                    {
+                        deleter(*itr);
+                        itr = queue.erase(itr);
+                    }
+                    else
+                    {
+                        ++itr;
+                    }
+                }
+            }
+            ~DeletionQueue()
+            {
+                for (auto &p : queue)
+                {
+                    deleter(p);
+                }
+            }
+        };
     };
 
     template <typename BucketPolicy, typename K, typename V, typename Hasher = std::hash<K>, typename Comparer = std::equal_to<K>>
-    struct ConHashMap
+    struct ConHashMap : private BucketPolicy::DeletionQueue
     {
-        struct PairType
+        struct HashListNode : public BucketPolicy::DeletionFlag
         {
             K k;
             V v;
+            HashListNode *next;
         };
-        typedef ListNode<PairType> HashListNode;
+
         struct Bucket
         {
             std::atomic<HashListNode *> ptr = {nullptr};
-            typename BucketPolicy::BucketLock bucketLock;
+            SpinLock bucketLock;
         };
 
         Bucket *buckets;
@@ -53,10 +121,9 @@ namespace Kuai
         Comparer cmper;
 
     private:
-        using BucketReadLock = typename BucketPolicy::BucketReadLock;
-        using BucketWriteLock = typename BucketPolicy::BucketWriteLock;
         Bucket &getBucket(const K &k)
         {
+            BucketPolicy::updateLocalClock();
             uint32_t hashv = hasher(k);
             return buckets[hashv % bucketNum];
         }
@@ -65,8 +132,8 @@ namespace Kuai
         {
             HashListNode *ret = new HashListNode();
             ret->next = next;
-            ret->data.k = k;
-            ret->data.v = std::move(v);
+            ret->k = k;
+            ret->v = std::move(v);
             return ret;
         }
 
@@ -74,34 +141,49 @@ namespace Kuai
         {
             HashListNode *ret = new HashListNode();
             ret->next = next;
-            ret->data.k = k;
-            ret->data.v = v;
+            ret->k = k;
+            ret->v = v;
             return ret;
         }
 
-        HashListNode *findNode(HashListNode *headNode, const K &k, HashListNode *&prevNode)
+        HashListNode *findNode(std::atomic<HashListNode *> &head, const K &k, HashListNode *&prevNode)
         {
-            prevNode = nullptr;
-            while (headNode)
+            for (;;)
             {
-                if (cmper(headNode->data.k, k))
+                prevNode = nullptr;
+                HashListNode *headNode = head.load(); // reload head node if we met a deleted node
+                bool retry = false;
+                while (headNode)
                 {
-                    return headNode;
+                    if (headNode->isDeleted())
+                    {
+                        retry = true;
+                        break;
+                    }
+                    if (cmper(headNode->k, k))
+                    {
+                        return headNode;
+                    }
+                    prevNode = headNode;
+                    headNode = headNode->next;
                 }
-                prevNode = headNode;
-                headNode = headNode->next;
+                if (!retry)
+                    return nullptr;
             }
-            return nullptr;
         }
 
-        HashListNode *findNode(HashListNode *headNode, const K &k)
+        HashListNode *findNode(std::atomic<HashListNode *> &headNode, const K &k)
         {
             HashListNode *prevNode;
             return findNode(headNode, k, prevNode);
         }
+        static void nodeDeleter(typename BucketPolicy::DeletionFlag *node)
+        {
+            delete static_cast<HashListNode *>(node);
+        }
 
     public:
-        ConHashMap(size_t numBuckets)
+        ConHashMap(size_t numBuckets) : BucketPolicy::DeletionQueue(nodeDeleter)
         {
             buckets = new Bucket[numBuckets];
             bucketNum = numBuckets;
@@ -125,12 +207,10 @@ namespace Kuai
         V *get(const K &k)
         {
             Bucket &buck = getBucket(k);
-            auto &&rlock = BucketPolicy::getReadLockRef(buck.bucketLock);
-            std::lock_guard<BucketReadLock> guard(rlock);
             HashListNode *cur = findNode(buck.ptr, k);
             if (cur)
             {
-                return &cur->data.v;
+                return &cur->v;
             }
             return nullptr;
         }
@@ -139,14 +219,12 @@ namespace Kuai
         void set(const K &k, VType &&v)
         {
             Bucket &buck = getBucket(k);
-            auto &&wlock = BucketPolicy::getWriteLockRef(buck.bucketLock);
-            std::lock_guard<BucketWriteLock> guard(wlock);
-            HashListNode *cur = buck.ptr;
-            HashListNode *headNode = cur;
-            cur = findNode(cur, k);
+            std::lock_guard<SpinLock> guard(buck.bucketLock);
+            HashListNode *headNode = buck.ptr;
+            HashListNode *cur = findNode(buck.ptr, k);
             if (cur)
             {
-                cur->data.v = std::forward<VType>(v);
+                cur->v = std::forward<VType>(v);
                 return;
             }
             buck.ptr = makeNewNode(k, std::forward<VType>(v), headNode);
@@ -156,12 +234,9 @@ namespace Kuai
         typename std::enable_if<Dummy::canRemove>::type remove(const K &k)
         {
             Bucket &buck = getBucket(k);
-            auto &&wlock = BucketPolicy::getWriteLockRef(buck.bucketLock);
-            std::lock_guard<BucketWriteLock> guard(wlock);
-            HashListNode *cur = buck.ptr;
-            HashListNode *headNode = cur;
+            std::lock_guard<SpinLock> guard(buck.bucketLock);
             HashListNode *prevNode;
-            cur = findNode(cur, k, prevNode);
+            HashListNode *cur = findNode(buck.ptr, k, prevNode);
             if (cur)
             {
                 if (prevNode)
@@ -172,24 +247,29 @@ namespace Kuai
                 {
                     buck.ptr = cur->next;
                 }
-                delete cur;
+                cur->markDeleted();
+                this->enqueue(cur);
                 return;
             }
             throw std::runtime_error("Cannot find the key!");
+        }
+
+        template <typename Dummy = BucketPolicy>
+        typename std::enable_if<Dummy::canRemove>::type garbageCollect()
+        {
+            this->doGC();
         }
 
         template <typename VType>
         V *setIfAbsent(const K &k, VType &&v)
         {
             Bucket &buck = getBucket(k);
-            auto &&wlock = BucketPolicy::getWriteLockRef(buck.bucketLock);
-            std::lock_guard<BucketWriteLock> guard(wlock);
-            HashListNode *cur = buck.ptr;
-            HashListNode *headNode = cur;
-            cur = findNode(cur, k);
+            std::lock_guard<SpinLock> guard(buck.bucketLock);
+            HashListNode *headNode = buck.ptr;
+            HashListNode *cur = findNode(buck.ptr, k);
             if (cur)
             {
-                return &cur->data.v;
+                return &cur->v;
             }
             buck.ptr = makeNewNode(k, std::forward<VType>(v), headNode);
             return nullptr;
