@@ -111,7 +111,7 @@ namespace Kuai
 
         struct Bucket
         {
-            std::atomic<HashListNode *> ptr = {nullptr};
+            HashListNode *ptr = {nullptr};
             SpinLock bucketLock;
         };
 
@@ -146,12 +146,12 @@ namespace Kuai
             return ret;
         }
 
-        HashListNode *findNode(std::atomic<HashListNode *> &head, const K &k, HashListNode *&prevNode)
+        HashListNode *findNode(HashListNode *&head, const K &k, HashListNode *&prevNode)
         {
             for (;;)
             {
                 prevNode = nullptr;
-                HashListNode *headNode = head.load(); // reload head node if we met a deleted node
+                HashListNode *headNode = head; // reload head node if we met a deleted node
                 bool retry = false;
                 while (headNode)
                 {
@@ -172,7 +172,7 @@ namespace Kuai
             }
         }
 
-        HashListNode *findNode(std::atomic<HashListNode *> &headNode, const K &k)
+        HashListNode *findNode(HashListNode *&headNode, const K &k)
         {
             HashListNode *prevNode;
             return findNode(headNode, k, prevNode);

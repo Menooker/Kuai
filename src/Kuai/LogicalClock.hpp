@@ -51,7 +51,7 @@ namespace Kuai
         static thread_local ThreadClock tls_clock;
         static void updateLocalClock()
         {
-            tls_clock.logicalClock.store(GlobalClock::clock.logicalClock.load());
+            tls_clock.logicalClock.store(GlobalClock::clock.logicalClock.load(), std::memory_order_relaxed);
         }
     };
 

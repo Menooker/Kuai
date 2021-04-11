@@ -4,10 +4,25 @@
 #include <cassert>
 #include <thread>
 #include <chrono>
+#include <unordered_map>
 using namespace Kuai;
 
 using RemovableMap = ConHashMap<PolicyCanRemove, int, int>;
 using NonRemovableMap = ConHashMap<PolicyNoRemove, int, int>;
+
+struct StdHashMap
+{
+    std::unordered_map<int, int> impl;
+    StdHashMap(int size) : impl(size) {}
+    void set(int k, int v)
+    {
+        impl[k] = v;
+    }
+    int *get(int k)
+    {
+        return &impl.find(k)->second;
+    }
+};
 
 template <typename T>
 void same_entry_test(int num_iter, bool printit)
@@ -47,11 +62,13 @@ void multi_thread_read_same_entry()
     same_entry_test<RemovableMap>(1000, false);
     same_entry_test<RemovableMap>(num_iter, true);
 
-    
     printf("====================\nNonRemovable\n");
     same_entry_test<NonRemovableMap>(1000, false);
     same_entry_test<NonRemovableMap>(num_iter, true);
 
+    printf("====================\nstd::unordered_map\n");
+    same_entry_test<StdHashMap>(1000, false);
+    same_entry_test<StdHashMap>(num_iter, true);
 }
 
 int main()
