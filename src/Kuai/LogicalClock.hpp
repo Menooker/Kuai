@@ -38,7 +38,7 @@ namespace Kuai
 
     struct ThreadClock
     {
-        std::atomic<uint64_t> logicalClock = {0};
+        std::atomic<uint64_t> logicalClock = {GlobalClock::clock.logicalClock.load()};
         ThreadClock()
         {
             GlobalClock::clock.add_thread(this);

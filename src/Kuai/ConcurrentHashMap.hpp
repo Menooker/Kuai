@@ -44,7 +44,11 @@ namespace Kuai
             void markDeleted()
             {
                 // push up the global clock, indicating there is a new event that may not be seen by other cores
-                deleteTick.store(++GlobalClock::clock.logicalClock);
+                auto clockv = ++GlobalClock::clock.logicalClock;
+                deleteTick.store(clockv);
+                // update the clock for the current thread because we have already seen it
+                ThreadClock::tls_clock.logicalClock.store(clockv, std::memory_order::memory_order_relaxed);
+
             }
 
             bool readyToDelete()
@@ -75,6 +79,7 @@ namespace Kuai
 
             void doGC()
             {
+                updateLocalClock();
                 std::lock_guard<std::mutex> guard(lock);
                 for (auto itr = queue.begin(); itr != queue.end();)
                 {
