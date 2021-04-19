@@ -106,6 +106,11 @@ template <typename T>
 void do_perf_test(int num_iter, int read_percent, bool printit)
 {
     T map(1024 * 1024);
+    const int max_key = 1024 * 512;
+    for (int i = 0; i < max_key; i++)
+    {
+        map.set(i, i);
+    }
     std::atomic<bool> startflag = {{false}};
     auto thread_func = [&map, num_iter, printit, read_percent, &startflag](uint32_t seed) {
         while (!startflag)
@@ -117,7 +122,7 @@ void do_perf_test(int num_iter, int read_percent, bool printit)
             auto action = myrand(seed);
             if (action % 100 <= read_percent)
             {
-                auto val = map.get(myrand(seed));
+                auto val = map.get(myrand(seed) % max_key);
                 if (val)
                 {
                     sum += *val;
@@ -125,7 +130,7 @@ void do_perf_test(int num_iter, int read_percent, bool printit)
             }
             else
             {
-                map.set(myrand(seed), myrand(seed));
+                map.set(myrand(seed) % max_key, myrand(seed));
             }
         }
     };

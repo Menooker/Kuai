@@ -67,9 +67,9 @@ Number of threads = 4. gcc version 5.4.0 20160609 (Ubuntu 5.4.0-6ubuntu1~16.04.1
 
 | Test name | Removable   | NonRemovable  | std::unordered_map + RW lock| std::unordered_map (no lock)|
 |  ----     |  ----       | ----          | ----  | ----  |
-| 500000 gets/sets. 20% of total is `get`  | 203   | 151 | 4717| N/A |
-| 500000 gets/sets. 80% of total is `get`  | 64   | 56 | 3198| N/A|
-| 500000 gets  | 31   | 26 | 365| 364|
+| 500000 gets/sets. 20% of total is `get`  | 115   | 102 | 3132| N/A |
+| 500000 gets/sets. 80% of total is `get`  | 63   | 57 | 2367| N/A|
+| 500000 gets  | 50   | 40 | 471| 459|
 | Reading the same key (5000000 times)  | 33   | 3 | 2425| 65 |
 
 ## Node removal implementation
