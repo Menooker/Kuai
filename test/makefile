@@ -9,11 +9,15 @@ ${BIN_DIR}:
 
 ${BIN_DIR}/main.o: ${SRC} ${BIN_DIR} main.cpp
 	g++ -c ${CXXFLAGS} main.cpp -o ${BIN_DIR}/main.o
-${BIN_DIR}/benchmark.o : ${SRC} ${BIN_DIR} benchmark.cpp
-	g++ -c ${CXXFLAGS} benchmark.cpp -o ${BIN_DIR}/benchmark.o
 
 ${BIN_DIR}/main: ${BIN_DIR}/main.o
 	g++ ${CXXFLAGS} -pthread ${BIN_DIR}/main.o -o ${BIN_DIR}/main
 
-${BIN_DIR}/benchmark: ${BIN_DIR}/benchmark.o 
-	g++ ${CXXFLAGS} -pthread ${BIN_DIR}/benchmark.o -o ${BIN_DIR}/benchmark
+${BIN_DIR}/benchmark:  ${SRC} ${BIN_DIR} benchmark.cpp
+	g++ ${CXXFLAGS} -pthread benchmark.cpp -o ${BIN_DIR}/benchmark
+
+.PHONY: benchtbb
+benchtbb: ${BIN_DIR}/benchmark-tbb
+
+${BIN_DIR}/benchmark-tbb:  ${SRC} ${BIN_DIR} benchmark.cpp
+	g++ ${CXXFLAGS} -DBENCH_TBB -pthread benchmark.cpp -ltbb -o ${BIN_DIR}/benchmark-tbb

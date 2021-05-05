@@ -62,15 +62,17 @@ Thus, when `remove` is called, it will not immediately free the key-value pair. 
 
 ## Performance
 
-Tested on Intel(R) Core(TM) i7-7700HQ CPU @ 2.80GHz, WSL2 on Win10.
-Number of threads = 4. gcc version 5.4.0 20160609 (Ubuntu 5.4.0-6ubuntu1~16.04.12). Optimized with `-O2`.
+Tested on Intel(R) Core(TM) i7-7700HQ CPU @ 2.80GHz, WSL2 on Win10. Ubuntu 20.04 in Docker.
+Number of threads = 4. gcc version 9.3.0 (Ubuntu 9.3.0-17ubuntu1~20.04). Optimized with `-O2`.
 
-| Test name | Removable   | NonRemovable  | std::unordered_map + RW lock| std::unordered_map (no lock)|
-|  ----     |  ----       | ----          | ----  | ----  |
-| 500000 gets/sets. 20% of total is `get`  | 115   | 102 | 3132| N/A |
-| 500000 gets/sets. 80% of total is `get`  | 63   | 57 | 2367| N/A|
-| 500000 gets  | 50   | 40 | 471| 459|
-| Reading the same key (5000000 times)  | 33   | 3 | 2425| 65 |
+TBB (Intel Thread Building Blocks) version 2021.2.0-357. Testing int-int mapping.
+
+| Test name | Removable   | NonRemovable  | tbb::concurrent_hash_map | std::unordered_map + RW lock| std::unordered_map (no lock)|
+|  ----     |  ----       | ----          | ----  | ----  | ----  |
+| 500000 gets/sets. 20% of total is `get`  | 110   | 102 | 109 | 1846| N/A |
+| 500000 gets/sets. 80% of total is `get`  | 59   | 52 | 112 | 2226| N/A|
+| 500000 gets  | 40   | 36 | 106 |220| 202|
+| Reading the same key (5000000 times)  | 21   | 4 | N/A | 2031| 8 |
 
 ## Node removal implementation
 

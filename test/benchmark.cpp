@@ -6,6 +6,9 @@
 #include <chrono>
 #include <unordered_map>
 #include <pthread.h>
+#ifdef BENCH_TBB
+#include "tbb/concurrent_hash_map.h"
+#endif
 using namespace Kuai;
 
 using RemovableMap = ConHashMap<PolicyCanRemove, int, int>;
@@ -46,8 +49,34 @@ struct StdHashMapLocked
     }
 };
 
+#ifdef BENCH_TBB
+struct TbbHashMap
+{
+    using tbbmap = tbb::concurrent_hash_map<int, int>;
+    tbbmap impl;
+    TbbHashMap(int size) : impl(size) {}
+
+    void set(int k, int v)
+    {
+        tbbmap::accessor acc;
+        impl.insert(acc, k);
+        acc->second = v;
+    }
+    const int *get(int k)
+    {
+        tbbmap::const_accessor acc;
+        auto found = impl.find(acc, k);
+        if (!found)
+        {
+            return nullptr;
+        }
+        return &acc->second;
+    }
+};
+#endif
+
 template <typename T>
-void same_entry_test(int num_iter, bool printit)
+void same_entry_test(int num_iter, bool printit, int numthreads)
 {
     T map(1024);
     map.set(0, 123);
@@ -60,13 +89,13 @@ void same_entry_test(int num_iter, bool printit)
             sum += *map.get(2);
         }
     };
-    std::thread threads[4];
+    std::thread threads[numthreads];
     auto start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < numthreads; i++)
     {
         threads[i] = std::thread(thread_func);
     }
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < numthreads; i++)
     {
         threads[i].join();
     }
@@ -75,25 +104,25 @@ void same_entry_test(int num_iter, bool printit)
         printf("TIME= %ld ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(endt - start).count());
 }
 
-void multi_thread_read_same_entry()
+void multi_thread_read_same_entry(int numthreads)
 {
     printf("******************\nSame entry performance\n");
     int num_iter = 5000000;
     printf("====================\nRemovable\n");
-    same_entry_test<RemovableMap>(1000, false);
-    same_entry_test<RemovableMap>(num_iter, true);
+    same_entry_test<RemovableMap>(1000, false, numthreads);
+    same_entry_test<RemovableMap>(num_iter, true, numthreads);
 
     printf("====================\nNonRemovable\n");
-    same_entry_test<NonRemovableMap>(1000, false);
-    same_entry_test<NonRemovableMap>(num_iter, true);
+    same_entry_test<NonRemovableMap>(1000, false, numthreads);
+    same_entry_test<NonRemovableMap>(num_iter, true, numthreads);
 
     printf("====================\nstd::unordered_map\n");
-    same_entry_test<StdHashMap>(1000, false);
-    same_entry_test<StdHashMap>(num_iter, true);
+    same_entry_test<StdHashMap>(1000, false, numthreads);
+    same_entry_test<StdHashMap>(num_iter, true, numthreads);
 
     printf("====================\nstd::unordered_map with RWLock\n");
-    same_entry_test<StdHashMapLocked>(1000, false);
-    same_entry_test<StdHashMapLocked>(num_iter, true);
+    same_entry_test<StdHashMapLocked>(1000, false, numthreads);
+    same_entry_test<StdHashMapLocked>(num_iter, true, numthreads);
 }
 
 uint32_t myrand(uint32_t &seed)
@@ -103,7 +132,7 @@ uint32_t myrand(uint32_t &seed)
 }
 
 template <typename T>
-void do_perf_test(int num_iter, int read_percent, bool printit)
+void do_perf_test(int num_iter, int read_percent, bool printit, int numthreads)
 {
     T map(1024 * 1024);
     const int max_key = 1024 * 512;
@@ -134,14 +163,14 @@ void do_perf_test(int num_iter, int read_percent, bool printit)
             }
         }
     };
-    std::thread threads[4];
-    for (int i = 0; i < 4; i++)
+    std::thread threads[numthreads];
+    for (int i = 0; i < numthreads; i++)
     {
         threads[i] = std::thread(thread_func, i);
     }
     startflag = true;
     auto start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < numthreads; i++)
     {
         threads[i].join();
     }
@@ -150,35 +179,45 @@ void do_perf_test(int num_iter, int read_percent, bool printit)
         printf("TIME= %ld ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(endt - start).count());
 }
 
-void perf_test(int read_percent)
+void perf_test(int read_percent, int numthreads)
 {
 
     printf("******************\nPerf test, read = %d%%\n", read_percent);
     int num_iter = 500000;
     printf("====================\nRemovable\n");
-    do_perf_test<RemovableMap>(1000, read_percent, false);
-    do_perf_test<RemovableMap>(num_iter, read_percent, true);
+    do_perf_test<RemovableMap>(1000, read_percent, false, numthreads);
+    do_perf_test<RemovableMap>(num_iter, read_percent, true, numthreads);
 
     printf("====================\nNonRemovable\n");
-    do_perf_test<NonRemovableMap>(1000, read_percent, false);
-    do_perf_test<NonRemovableMap>(num_iter, read_percent, true);
+    do_perf_test<NonRemovableMap>(1000, read_percent, false, numthreads);
+    do_perf_test<NonRemovableMap>(num_iter, read_percent, true, numthreads);
 
     printf("====================\nstd::unordered_map\n");
-    do_perf_test<StdHashMapLocked>(1000, read_percent, false);
-    do_perf_test<StdHashMapLocked>(num_iter, read_percent, true);
+    do_perf_test<StdHashMapLocked>(1000, read_percent, false, numthreads);
+    do_perf_test<StdHashMapLocked>(num_iter, read_percent, true, numthreads);
 
+#ifdef BENCH_TBB
+    printf("====================\nTbbHashMap\n");
+    do_perf_test<TbbHashMap>(1000, read_percent, false, numthreads);
+    do_perf_test<TbbHashMap>(num_iter, read_percent, true, numthreads);
+#endif
     if (read_percent == 100)
     {
         printf("====================\nstd::unordered_map\n");
-        do_perf_test<StdHashMapLocked>(1000, read_percent, false);
-        do_perf_test<StdHashMapLocked>(num_iter, read_percent, true);
+        do_perf_test<StdHashMapLocked>(1000, read_percent, false, numthreads);
+        do_perf_test<StdHashMapLocked>(num_iter, read_percent, true, numthreads);
     }
 }
 
-int main()
+int main(int args, char *argv[])
 {
-    perf_test(20);
-    perf_test(80);
-    perf_test(100);
-    multi_thread_read_same_entry();
+    int numthreads = 4;
+    if (args == 2)
+    {
+        numthreads = atoi(argv[1]);
+    }
+    perf_test(20, numthreads);
+    perf_test(80, numthreads);
+    perf_test(100, numthreads);
+    multi_thread_read_same_entry(numthreads);
 }
